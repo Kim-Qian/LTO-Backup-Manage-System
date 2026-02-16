@@ -1,0 +1,14 @@
+{
+    "debug_mode": true,
+    "drive_letter": "T:\\",
+    "local_debug_path": "local_tape_storage",
+    "key_storage_path": "keys",
+    "generations": {
+        "L5": {"capacity": 1500000000000, "name": "LTO-5"},
+        "L6": {"capacity": 2500000000000, "name": "LTO-6"},
+        "L7": {"capacity": 6000000000000, "name": "LTO-7"},
+        "L8": {"capacity": 12000000000000, "name": "LTO-8"},
+        "L9": {"capacity": 18000000000000, "name": "LTO-9"},
+        "L10": {"capacity": 40000000000000, "name": "LTO-10"}
+    }
+}

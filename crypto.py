@@ -12,13 +12,17 @@ from cryptography.fernet import Fernet
 # KEY DERIVATION
 # =========================
 
+# NIST SP 800-132 (2023) recommends a minimum of 600,000 iterations for
+# PBKDF2-HMAC-SHA256.  Updating from the previous 200,000.
+PBKDF2_ITERATIONS = 600_000
+
 def derive_key(passphrase: bytes, salt: bytes) -> bytes:
-    """Derive a 32-byte (256-bit) key from a passphrase."""
+    """Derive a 32-byte (256-bit) key from a passphrase using PBKDF2-HMAC-SHA256."""
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
         salt=salt,
-        iterations=200_000,
+        iterations=PBKDF2_ITERATIONS,
         backend=default_backend()
     )
     return kdf.derive(passphrase)

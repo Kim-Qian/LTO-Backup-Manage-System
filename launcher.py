@@ -12,8 +12,13 @@ import shutil
 import subprocess
 
 from db import Database
+from config_manager import cfg
 from ui import console
 from rich.table import Table
+from rich.columns import Columns
+from rich.panel import Panel
+from rich.text import Text
+from datetime import datetime, timezone
 
 # Optional pyfiglet
 try:
@@ -229,10 +234,10 @@ def wait_any_key():
 # -------- main logic --------
 
 def run_main():
-    if not os.path.exists("main.exe"):
-        print("ERROR: main.exe not found")
+    if not os.path.exists("main.py"):
+        print("ERROR: main.py not found")
         sys.exit(1)
-    subprocess.call([sys.executable, "main.exe"])
+    subprocess.call([sys.executable, "main.py"])
 
 def print_banner():
     print("\n")
@@ -249,31 +254,103 @@ def print_banner():
     typewriter_rainbow_centered("Designed By Kim Qian", delay=0.02)
     print()
 
+def _make_stat_card(icon, value, label, value_style="bold cyan"):
+    """Build a single Rich Panel stat card for the dashboard."""
+    content = Text(justify="center")
+    content.append(f"{icon}\n", style="")
+    content.append(f"{value}\n", style=value_style)
+    content.append(label, style="dim")
+    return Panel(content, border_style="blue", padding=(1, 3))
+
+
+def print_dashboard(db):
+    """Render a one-screen summary dashboard using Rich panels and a table."""
+
+    # ---- Global stats --------------------------------------------------------
+    tape_count = db.conn.execute("SELECT COUNT(*) FROM tapes").fetchone()[0]
+
+    total_used = db.conn.execute(
+        "SELECT SUM(used_capacity) FROM tapes"
+    ).fetchone()[0] or 0
+
+    failed_jobs = db.conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE status='FAILED'"
+    ).fetchone()[0]
+
+    last_bk_row = db.conn.execute(
+        "SELECT MAX(finished_at) FROM jobs WHERE status='SUCCESS' AND action='BACKUP'"
+    ).fetchone()
+    last_backup_ts = last_bk_row[0] if last_bk_row else None
+
+    if last_backup_ts:
+        try:
+            dt = datetime.fromisoformat(last_backup_ts)
+            last_backup_str = dt.strftime("%Y-%m-%d  %H:%M")
+        except Exception:
+            last_backup_str = last_backup_ts
+    else:
+        last_backup_str = "Never"
+
+    used_tb = total_used / 1024 ** 4
+
+    # Colour-code the failed-jobs card
+    fail_style = "bold red" if failed_jobs > 0 else "bold green"
+
+    # ---- Four summary cards --------------------------------------------------
+    cards = [
+        _make_stat_card("📼", str(tape_count), "Total Tapes"),
+        _make_stat_card("💾", f"{used_tb:.3f} TB", "Total Used"),
+        _make_stat_card("❌" if failed_jobs > 0 else "✅",
+                        str(failed_jobs), "Failed Jobs", fail_style),
+        _make_stat_card("🕒", last_backup_str, "Last Backup", "bold white"),
+    ]
+    console.print(Columns(cards, equal=True, expand=True))
+
+    # ---- Per-tape breakdown table -------------------------------------------
+    tape_rows = db.conn.execute(
+        "SELECT tape_id, generation, encrypted, description, used_capacity "
+        "FROM tapes ORDER BY tape_id"
+    ).fetchall()
+
+    if not tape_rows:
+        console.print("[dim]No tapes registered yet.[/]")
+        return
+
+    table = Table(show_header=True, header_style="bold magenta", box=None)
+    table.add_column("Tape ID",     style="cyan",  no_wrap=True)
+    table.add_column("Gen",         no_wrap=True)
+    table.add_column("Enc",         no_wrap=True)
+    table.add_column("Used",        justify="right", no_wrap=True)
+    table.add_column("Usage %",     justify="right", no_wrap=True)
+    table.add_column("Description")
+
+    for tid, gen, enc, desc, used in tape_rows:
+        gen_info = cfg.get_generation_info(gen)
+        max_cap  = gen_info.get("capacity", 1)
+        pct      = used / max_cap * 100 if max_cap > 0 else 0
+
+        # Colour the usage percentage based on thresholds
+        if pct > 95:
+            pct_str = f"[red]{pct:.1f}%[/]"
+        elif pct > 80:
+            pct_str = f"[yellow]{pct:.1f}%[/]"
+        else:
+            pct_str = f"[green]{pct:.1f}%[/]"
+
+        enc_str  = "[red]🔒[/]" if enc else "[green]🔓[/]"
+        used_str = f"{used / 1024**3:.2f} GB"
+
+        table.add_row(tid, gen, enc_str, used_str, pct_str, desc or "")
+
+    console.print(table)
+
+
 def main():
     print_banner()
     # loading_bar()
 
     db = Database()
-    tapes = db.conn.execute("SELECT tape_id, generation, encrypted, description, used_capacity FROM tapes").fetchall()
-    
-    if not tapes:
-        console.print("[red]No tapes found.[/]")
-    else:
-        # Use Rich Table for summary
-        table = Table(show_header=True, header_style="bold magenta")
-        table.add_column("#", style="dim")
-        table.add_column("ID", style="cyan")
-        table.add_column("Gen")
-        table.add_column("Status")
-        table.add_column("Capacity")
-        table.add_column("Description")
-
-        for i, (tid, gen, enc, desc, used) in enumerate(tapes, start=1):
-            status = "[red]Locked[/]" if enc else "[green]Plain[/]"
-            cap_gb = used / 1024**3
-            table.add_row(str(i), tid, gen, status, f"{cap_gb:.2f} GB", desc)
-        
-        console.print(table)
+    print_dashboard(db)
 
     wait_any_key()
     # print("\nLaunching main.py...\n")
@@ -282,3 +359,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
